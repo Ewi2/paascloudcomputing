@@ -1,0 +1,65 @@
+{{- include "paas.validate" . -}}
+{{- $plan := include "paas.plan" . | fromYaml -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.appName }}
+  labels:
+    {{- include "paas.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ int .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "paas.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "paas.labels" . | nindent 8 }}
+      annotations:
+        checksum/env: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        image: {{ .Values.image | quote }}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: {{ int .Values.port }}
+        {{- if or .Values.env .Values.secretEnv }}
+        envFrom:
+        {{- if .Values.env }}
+        - configMapRef:
+            name: {{ .Values.appName }}-env
+        {{- end }}
+        {{- if .Values.secretEnv }}
+        - secretRef:
+            name: {{ .Values.appName }}-secret
+        {{- end }}
+        {{- end }}
+        resources:
+          {{- toYaml $plan.resources | nindent 10 }}
+        readinessProbe:
+          tcpSocket:
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+        {{- if .Values.persistence.enabled }}
+        volumeMounts:
+        - name: data
+          mountPath: {{ .Values.persistence.mountPath }}
+        {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ .Values.appName }}-data
+      {{- end }}

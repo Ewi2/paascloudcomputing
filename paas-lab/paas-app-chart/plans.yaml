@@ -1,0 +1,22 @@
+# Planes del proveedor. Regla de coherencia con la ResourceQuota del tenant:
+#   maxReplicas * requests.cpu + maxSurge (25%, redondeado arriba) * requests.cpu <= quota requests.cpu
+# Para agregar un plan 'premium': definirlo aquí, agregarlo al enum de values.schema.json
+# y elevar la ResourceQuota del tenant que lo contrate.
+basic:
+  maxReplicas: 5
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 250m, memory: 256Mi}
+  rateLimit:            # límite de solicitudes HTTP por IP de origen en el Ingress
+    rps: 10
+    connections: 20
+    burstMultiplier: 1
+standard:
+  maxReplicas: 8
+  resources:
+    requests: {cpu: 150m, memory: 192Mi}
+    limits: {cpu: 300m, memory: 384Mi}
+  rateLimit:
+    rps: 50
+    connections: 100
+    burstMultiplier: 1

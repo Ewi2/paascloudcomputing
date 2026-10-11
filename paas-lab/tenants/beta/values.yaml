@@ -1,0 +1,16 @@
+# Único archivo editable por el cliente beta (aplicación Python/Flask, no un servidor web estático).
+appName: api-httpbin
+image: "kennethreitz/httpbin:latest"
+port: 80
+replicaCount: 1
+domain: beta.paas.local
+env:
+  GUNICORN_CMD_ARGS: "--capture-output --error-logfile - --workers 2"
+persistence:                     # volumen del cliente (consume la cuota de storage de beta)
+  enabled: true
+  size: 1Gi
+  mountPath: /data
+autoscaling:
+  enabled: true
+  maxReplicas: 5
+  targetCPU: 70

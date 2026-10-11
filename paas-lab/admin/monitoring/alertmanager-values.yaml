@@ -1,0 +1,28 @@
+# Enrutamiento de alertas por tenant. Aplicar sobre el stack ya instalado:
+#   helm upgrade prometheus prometheus-community/kube-prometheus-stack \
+#     -n monitoring --reuse-values -f admin/monitoring/alertmanager-values.yaml
+# Los receptores apuntan al 'alert-sink' del laboratorio; en producción reemplazar
+# webhook_configs por email_configs / slack_configs con el contacto real de cada cliente.
+alertmanager:
+  config:
+    route:
+      receiver: "null"
+      group_by: [namespace, alertname]
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 30m
+      routes:
+      - matchers: ['namespace="tenant-alpha"']
+        receiver: cliente-alpha
+      - matchers: ['namespace="tenant-beta"']
+        receiver: cliente-beta
+    receivers:
+    - name: "null"
+    - name: cliente-alpha
+      webhook_configs:
+      - url: http://alert-sink.monitoring.svc.cluster.local:8080/alpha
+        send_resolved: true
+    - name: cliente-beta
+      webhook_configs:
+      - url: http://alert-sink.monitoring.svc.cluster.local:8080/beta
+        send_resolved: true

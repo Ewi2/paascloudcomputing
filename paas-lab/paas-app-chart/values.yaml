@@ -1,0 +1,23 @@
+# Valores por defecto del chart (propiedad del administrador).
+# El cliente NO edita este archivo: su único archivo es tenants/<tenant>/values.yaml.
+# Obligatorios en el archivo del cliente: appName, image, domain.
+
+port: 80
+replicaCount: 1
+
+env: {}          # variables no sensibles  -> ConfigMap
+secretEnv: {}    # variables sensibles     -> Secret
+
+persistence:
+  enabled: false
+  size: 1Gi
+  mountPath: /data
+
+autoscaling:
+  enabled: false
+  maxReplicas: 2
+  targetCPU: 70
+
+# Los fija el administrador desde scripts/deploy.sh (--set-string); el cliente no los controla.
+plan: basic
+ingressClassName: nginx

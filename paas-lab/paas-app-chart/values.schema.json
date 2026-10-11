@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["appName", "image", "domain"],
+  "additionalProperties": false,
+  "properties": {
+    "appName": {
+      "type": "string",
+      "pattern": "^[a-z]([-a-z0-9]{0,40}[a-z0-9])?$",
+      "description": "Nombre DNS-1035 de la aplicación (también nombre del Service)."
+    },
+    "image": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/:-]{0,200}(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}|@sha256:[a-f0-9]{64})$",
+      "description": "Imagen con tag explícito o digest, p. ej. nginx:alpine."
+    },
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "replicaCount": {"type": "integer", "minimum": 1, "maximum": 100},
+    "domain": {
+      "type": "string",
+      "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?\\.)+[a-z]{2,}$"
+    },
+    "env": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+      "additionalProperties": {"type": "string"}
+    },
+    "secretEnv": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+      "additionalProperties": {"type": "string"}
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "size": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$"},
+        "mountPath": {"type": "string", "pattern": "^/[A-Za-z0-9_./-]*$"}
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "maxReplicas": {"type": "integer", "minimum": 1, "maximum": 100},
+        "targetCPU": {"type": "integer", "minimum": 10, "maximum": 95}
+      }
+    },
+    "plan": {"type": "string", "enum": ["basic", "standard"]},
+    "tenant": {"type": "string", "enum": ["alpha", "beta"]},
+    "ingressClassName": {"type": "string"}
+  }
+}
