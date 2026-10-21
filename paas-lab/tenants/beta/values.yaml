@@ -4,8 +4,13 @@ image: "kennethreitz/httpbin:latest"
 port: 80
 replicaCount: 1
 domain: beta.paas.local
-env:
+
+# Variables de entorno. Nombres: letras, dígitos y _. Valores: SIEMPRE entre comillas.
+env:                             # no sensibles (se guardan en un ConfigMap)
   GUNICORN_CMD_ARGS: "--capture-output --error-logfile - --workers 2"
+# secretEnv:                     # sensibles: claves, tokens (se guardan en un Secret)
+#   API_KEY: "cambiar-esto"
+
 persistence:                     # volumen del cliente (consume la cuota de storage de beta)
   enabled: true
   size: 1Gi

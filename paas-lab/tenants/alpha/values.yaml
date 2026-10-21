@@ -1,11 +1,15 @@
-# Único archivo editable por el cliente alpha.
 appName: mi-web-service          # nombre de la app (y del Service)
 image: "nginx:alpine"            # imagen con tag explícito (Docker Hub u otro registro)
 port: 80                         # puerto en el que escucha el contenedor
 replicaCount: 2                  # réplicas iniciales (máximo según plan)
 domain: alpha.paas.local         # dominio/subdominio de acceso
-env:                             # variables de entorno
-  APP_ENV: production
+
+# Variables de entorno. Nombres: letras, dígitos y _. Valores: SIEMPRE entre comillas.
+env:                             # no sensibles (se guardan en un ConfigMap)
+  APP_ENV: "production"
+# secretEnv:                     # sensibles: claves, tokens (se guardan en un Secret)
+#   DB_PASSWORD: "cambiar-xd"
+
 autoscaling:
   enabled: true
   maxReplicas: 8

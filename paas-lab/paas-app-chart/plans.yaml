@@ -1,7 +1,5 @@
-# Planes del proveedor. Regla de coherencia con la ResourceQuota del tenant:
+# Planes que se tienen predefinidos por el proveedor. Regla de coherencia con la ResourceQuota del tenant:
 #   maxReplicas * requests.cpu + maxSurge (25%, redondeado arriba) * requests.cpu <= quota requests.cpu
-# Para agregar un plan 'premium': definirlo aquí, agregarlo al enum de values.schema.json
-# y elevar la ResourceQuota del tenant que lo contrate.
 basic:
   maxReplicas: 5
   resources:

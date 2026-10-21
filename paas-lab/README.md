@@ -19,6 +19,7 @@ tests/                 isolation.sh, quota.sh, ratelimit.sh
 - **Alerta automática:** `PrometheusRule` (cuota >= 80 %, cuota agotada, HPA en su máximo) y Alertmanager enruta por `namespace` al receptor de cada cliente.
 - **Entrada de la aplicación:** solo imagen con tag explícito o digest. `deploy.sh` hace `docker pull` y `minikube image load`. El camino Dockerfile no se implementa.
 - **Cliente:** `image`, `replicaCount`, `env`/`secretEnv`, `domain` (más `port`, `persistence`, `autoscaling`). `replicaCount` y `autoscaling.maxReplicas` no pueden superar el máximo del plan.
+- **Variables de entorno:** el cliente las declara en su `values.yaml`: `env` (no sensibles, ConfigMap) y `secretEnv` (sensibles, Secret). Los valores van siempre entre comillas. Cambiarlas y repetir `deploy.sh` reinicia los pods.
 - **Plan y tenant:** los impone `deploy.sh` con `--set-string`; prevalecen sobre el archivo del cliente.
 
 ## Prerrequisitos
@@ -63,7 +64,7 @@ kubectl logs -n monitoring deploy/alert-sink
 | alpha | standard | 8 | 150m | 10 x 150m = 1.5 | 2 |
 | beta | basic | 5 | 100m | 7 x 100m = 0.7 | 1 |
 
-Quedan ~0.2 CPU en alpha para el Deployment manual `app-cliente-alpha` (2 x 100m).
+En alpha sobran 0.5 CPU; el Deployment manual `app-cliente-alpha` (2 x 100m) usa 0.2.
 
 ## Límites conocidos
 
@@ -71,4 +72,4 @@ Quedan ~0.2 CPU en alpha para el Deployment manual `app-cliente-alpha` (2 x 100m
 - El rate limit solo aplica al tráfico que entra por el Ingress. La prueba de carga de la guía (`wget` al Service interno) lo evita.
 - `limit-rps` es por IP de origen, no por tenant completo.
 - ARP es L2 y queda fuera de NetworkPolicy; `tests/isolation.sh` verifica ICMP y TCP.
-- El nodo de Minikube (4 CPU) no cubre cuotas de 3 CPU más el stack de monitoreo sin margen; las cuotas no reservan capacidad.
+- Las cuotas suman 3 CPU de requests y no reservan capacidad: con el stack de monitoreo, un nodo de 4 CPU queda justo.

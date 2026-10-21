@@ -35,7 +35,7 @@ spec:
           limits: {cpu: ${REQ}m, memory: 32Mi}
 EOF
 sleep 20
-if kubectl -n "$NS" get events --field-selector reason=FailedCreate -o jsonpath='{.items[*].message}' | grep -q 'exceeded quota'; then
+if kubectl -n "$NS" get events --field-selector reason=FailedCreate -o jsonpath='{.items[*].message}' | grep -q 'quota-probe.*exceeded quota'; then
   echo "PASS  el ReplicaSet recibió 'exceeded quota' al superar la cuota de CPU"
 else
   echo "FAIL  no se registró 'exceeded quota' (kubectl -n $NS describe rs)"; fail=1

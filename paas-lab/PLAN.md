@@ -110,6 +110,30 @@ Los clientes no pertenecen al grupo `docker` ni tienen kubeconfig. El enlace sim
 4. `docker pull` y `minikube image load`.
 5. `helm upgrade --install --atomic --wait` con `plan` y `tenant` impuestos. El esquema JSON y `_helpers.tpl` rechazan réplicas por encima del máximo del plan.
 
+### Variables de entorno
+
+**Cómo se piden.** El `values.yaml` del cliente es el formulario: `env` para valores no sensibles y `secretEnv` para credenciales o tokens.
+
+```yaml
+env:
+  APP_ENV: "production"
+  DB_HOST: "db.ejemplo.com"
+secretEnv:
+  DB_PASSWORD: "cambiar-esto"
+```
+
+**Validación.** `values.schema.json` exige nombres con el patrón `^[A-Za-z_][A-Za-z0-9_]*$` y valores de tipo texto. `PORT: 3000` sin comillas se rechaza (`3000 is not of type 'string'`); debe ser `PORT: "3000"`. Igual con `true` y `false`.
+
+**Cómo se aplican**
+1. `configmap.yaml` genera `<appName>-env` con `env`; `secret.yaml` genera `<appName>-secret` con `secretEnv`.
+2. `deployment.yaml` los inyecta con `envFrom` (`configMapRef` y `secretRef`). Si una clave está en ambos, gana `secretEnv` por declararse después.
+3. Las anotaciones `checksum/env` y `checksum/secret` del pod cambian con el contenido. Editar el `values.yaml` y repetir `deploy.sh` reinicia los pods con los valores nuevos; sin ellas, los pods conservarían los anteriores, porque las variables se leen solo al arrancar el contenedor.
+
+**Límites**
+- `secretEnv` queda en texto plano en el `values.yaml` (0640, legible por el administrador) y en el historial del release de Helm (Secret `sh.helm.release.v1.*` del namespace del tenant). Mejora posible: que el administrador cree el Secret y el cliente solo indique su nombre.
+- El chart no inyecta variables de plataforma como `PORT` (Render y Heroku sí); la aplicación debe escuchar en el `port` que declara el cliente.
+- Comprobado con jsonschema y con el simulador de render: ConfigMap, Secret, `envFrom`, cambio de checksum al editar un valor y rechazo de valores sin comillas y de nombres inválidos. No probado en un clúster real.
+
 ## 4. Pasos a seguir
 
 Ejecutar desde la raíz de `paas-lab/`, en el nodo Ubuntu de la guía HTML.
@@ -161,8 +185,10 @@ kubectl get deploy,svc,ingress,hpa -n tenant-alpha
 kubectl get deploy,svc,ingress,hpa,pvc -n tenant-beta
 curl -s -o /dev/null -w "%{http_code}\n" -H "Host: alpha.paas.local" http://$(minikube ip)/
 curl -s -o /dev/null -w "%{http_code}\n" -H "Host: beta.paas.local"  http://$(minikube ip)/
+kubectl exec -n tenant-alpha deploy/mi-web-service -- env | grep APP_ENV
+kubectl exec -n tenant-beta deploy/api-httpbin -- env | grep GUNICORN_CMD_ARGS
 ```
-Esperado: Deployment, Service, Ingress y HPA en ambos tenants (más PVC en beta) y `200` en los dos `curl`. Pruebas de rechazo: `replicaCount: 20`, imagen sin tag o un dominio de otro tenant en el `values.yaml` deben fallar con mensaje claro.
+Esperado: Deployment, Service, Ingress y HPA en ambos tenants (más PVC en beta), `200` en los dos `curl` y las variables declaradas dentro de cada pod (`APP_ENV=production`). Pruebas de rechazo: `replicaCount: 20`, imagen sin tag, un dominio de otro tenant o un valor de `env` sin comillas (`PORT: 3000`) deben fallar con mensaje claro.
 
 **Paso 6. Pruebas.**
 ```bash
