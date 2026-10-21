@@ -1,0 +1,20 @@
+# Fase 3: Prometheus Adapter expone 'ingress_requests_per_second' en custom.metrics.k8s.io.
+# Instalación sobre kube-prometheus-stack ya presente:
+#   helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
+#     -n monitoring -f admin/monitoring/prometheus-adapter-values.yaml --wait
+prometheus:
+  url: http://prometheus-kube-prometheus-prometheus.monitoring.svc
+  port: 9090
+rules:
+  default: false            # solo la regla propia; el HPA de CPU usa Metrics Server
+  custom:
+  - seriesQuery: 'nginx_ingress_controller_requests{namespace!="",ingress!=""}'
+    resources:
+      overrides:
+        namespace: {resource: namespace}
+        ingress: {group: networking.k8s.io, resource: ingress}
+    name:
+      matches: "^nginx_ingress_controller_requests$"
+      as: "ingress_requests_per_second"
+    # Excluye 5xx, incluidos los 503 del límite por IP: solo cuenta lo atendido por los pods
+    metricsQuery: 'sum(rate(<<.Series>>{status!~"5..",<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>)'
