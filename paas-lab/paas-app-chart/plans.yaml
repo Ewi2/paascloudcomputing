@@ -1,5 +1,10 @@
-# Planes que se tienen predefinidos por el proveedor. Regla de coherencia con la ResourceQuota del tenant:
-#   maxReplicas * requests.cpu + maxSurge (25%, redondeado arriba) * requests.cpu <= quota requests.cpu
+# Planes del proveedor. Regla de coherencia con la ResourceQuota del tenant:
+#   maxReplicas * requests.cpu + maxSurge (25 %, redondeado arriba) * requests.cpu <= quota requests.cpu
+
+# scaling.ingressRpsPerPod: peticiones/s por pod que fijan el objetivo del HPA por Ingress.
+#   Debe quedar por debajo de rateLimit.rps: un solo origen no supera rateLimit.rps, así que
+#   desde una máquina el HPA llega a ceil(rateLimit.rps / ingressRpsPerPod) réplicas.
+
 basic:
   maxReplicas: 5
   resources:
@@ -9,6 +14,8 @@ basic:
     rps: 10
     connections: 20
     burstMultiplier: 1
+  scaling:              # objetivo del HPA por Ingress (lo fija el proveedor, no el cliente)
+    ingressRpsPerPod: 5
 standard:
   maxReplicas: 8
   resources:
@@ -18,3 +25,5 @@ standard:
     rps: 50
     connections: 100
     burstMultiplier: 1
+  scaling:
+    ingressRpsPerPod: 20

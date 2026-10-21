@@ -1,6 +1,6 @@
 apiVersion: v2
 name: paas-app-chart
-description: Plantilla PaaS multi-tenant (Deployment, Service, Ingress, HPA) parametrizada por values.yaml
+description: Plantilla PaaS multi-tenant (Deployment, Service, Ingress, HPA, ConfigMap/Secret, PVC) parametrizada por values.yaml
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "1.0"

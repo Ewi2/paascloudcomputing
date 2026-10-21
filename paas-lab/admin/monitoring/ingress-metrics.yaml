@@ -1,0 +1,21 @@
+# Fases 3-4: métricas del Ingress Controller (ingress-nginx del addon de Minikube).
+# El label 'release: prometheus' hace que el Prometheus de kube-prometheus-stack lo seleccione
+# (mismo criterio que alerts.yaml).
+#   kubectl apply -f admin/monitoring/ingress-metrics.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: ingress-nginx
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames: [ingress-nginx]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  podMetricsEndpoints:
+  - targetPort: 10254        # puerto de métricas del NGINX Ingress Controller
+    path: /metrics
+    interval: 15s
