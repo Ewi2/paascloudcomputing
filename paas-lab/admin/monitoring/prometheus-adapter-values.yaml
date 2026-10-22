@@ -1,4 +1,3 @@
-# Fase 3: Prometheus Adapter expone 'ingress_requests_per_second' en custom.metrics.k8s.io.
 # Instalación sobre kube-prometheus-stack ya presente:
 #   helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
 #     -n monitoring -f admin/monitoring/prometheus-adapter-values.yaml --wait

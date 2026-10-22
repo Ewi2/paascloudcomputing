@@ -1,4 +1,3 @@
-# Fases 3-4: métricas del Ingress Controller (ingress-nginx del addon de Minikube).
 # El label 'release: prometheus' hace que el Prometheus de kube-prometheus-stack lo seleccione
 # (mismo criterio que alerts.yaml).
 #   kubectl apply -f admin/monitoring/ingress-metrics.yaml

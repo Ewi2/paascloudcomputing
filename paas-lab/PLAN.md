@@ -4,7 +4,7 @@ Proyecto Parcial1Cloud (Computación en la Nube). Entregable: `paas-lab.zip`, ca
 
 ## 1. Qué se hizo
 
-**Alcance.** Lo tratado en la reunión sobre el PDF: Fase 1 (aislamiento) y Fase 2 (abstracción con Helm) para `tenant-alpha` y `tenant-beta`. De las Fases 3 y 4 solo se incluyó el HPA, porque el chart del PDF lo lista (`hpa.yaml`).
+**Alcance.** Lo tratado en la reunión sobre el PDF: Fases 1 a 4 para `tenant-alpha` y `tenant-beta`. La Fase 3 escala por CPU y por peticiones/s del Ingress (HPA v2 con Prometheus Adapter). La Fase 4 es un tablero de Grafana filtrado por `$namespace`.
 
 **Secuencia**
 1. Análisis del PDF, de la guía HTML (IaaS con servicio medido) y de la transcripción. Se detectaron errores y brechas (sección 7) y tres ambigüedades.
@@ -24,6 +24,11 @@ Proyecto Parcial1Cloud (Computación en la Nube). Entregable: `paas-lab.zip`, ca
 | Archivo del cliente | `tenants/<tenant>/values.yaml`, separado del `values.yaml` del chart para poder aplicar permisos distintos por tenant. |
 | Aplicación de beta | httpbin (Python/Flask) con un PVC, para cumplir "otra tecnología" y ejercitar la cuota de storage. |
 | Cuotas | Valores del diagrama del PDF: alpha 2 CPU / 4 Gi, beta 1 CPU / 2 Gi (sobre `requests`), más `limits`, storage, PVC y pods. |
+| Autoescalado | HPA v2 con dos métricas: CPU (Metrics Server, objetivo del cliente, 10-95 %) y ingress_requests_per_second (Object sobre el Ingress, Prometheus Adapter, objetivo del plan). |
+| Métrica de Ingress | rate(nginx_ingress_controller_requests[1m]) sin 5xx. Los 503 del límite por IP no provocan escalado. |
+| Comportamiento del HPA | Subida 100 % cada 30 s; bajada 50 % cada 60 s con ventana de estabilización de 120 s. |  
+| Tablero (Fase 4) | Un tablero con variable $namespace (tenant-.+), ConfigMap con grafana_dashboard=1 y carpeta PaaS. |
+Métricas del Ingress	PodMonitor sobre los pods de ingress-nginx, puerto 10254.
 
 ### Trazabilidad con la reunión
 
@@ -45,45 +50,50 @@ Proyecto Parcial1Cloud (Computación en la Nube). Entregable: `paas-lab.zip`, ca
 
 ```
 paas-lab/
-├── PLAN.md                         este documento
-├── README.md                       resumen, prerrequisitos y comandos
-├── admin/                          Fase 1 (root:root)
-│   ├── tenant-alpha.yaml           Namespace, ResourceQuota, LimitRange, 4 NetworkPolicy
-│   ├── tenant-beta.yaml            igual, con valores propios de beta
-│   ├── tenants.env                 plan y dominio base por tenant
+├── PLAN.md
+├── README.md
+├── admin/
+│   ├── tenant-alpha.yaml
+│   ├── tenant-beta.yaml
+│   ├── tenants.env
 │   └── monitoring/
-│       ├── alerts.yaml             PrometheusRule: cuota >= 80 %, cuota agotada, HPA en su máximo
-│       ├── alertmanager-values.yaml  enrutamiento por namespace (helm upgrade --reuse-values)
-│       └── alert-sink.yaml         receptor de prueba que imprime las alertas
-├── paas-app-chart/                 Fase 2 (root:root)
-│   ├── Chart.yaml
-│   ├── values.yaml                 valores por defecto del chart
-│   ├── plans.yaml                  planes basic y standard (réplicas, recursos, rate limit)
-│   ├── values.schema.json          validación de lo que el cliente puede escribir
+│       ├── alerts.yaml                     PrometheusRule: cuota >= 80 %, cuota agotada, HPA en su máximo
+│       ├── alertmanager-values.yaml        enrutamiento por namespace (helm upgrade --reuse-values)
+│       ├── alert-sink.yaml                 receptor de prueba
+│       ├── ingress-metrics.yaml            PodMonitor del Ingress NGINX
+│       ├── prometheus-adapter-values.yaml  ingress_requests_per_second
+│       └── tenants-dashboard.yaml          tablero de Grafana por $namespace
+├── paas-app-chart/
+│   ├── Chart.yaml                          versión 0.2.0
+│   ├── values.yaml
+│   ├── plans.yaml                          incluye objetivo del HPA por Ingress
+│   ├── values.schema.json
 │   └── templates/
-│       ├── _helpers.tpl            lectura del plan, validaciones y etiquetas
-│       ├── deployment.yaml  service.yaml  ingress.yaml  hpa.yaml
+│       ├── _helpers.tpl
+│       ├── deployment.yaml  service.yaml  ingress.yaml
+│       ├── hpa.yaml                        CPU + peticiones/s del Ingress
 │       └── configmap.yaml  secret.yaml  pvc.yaml
 ├── tenants/
-│   ├── alpha/values.yaml           único archivo editable por cliente-alpha (nginx)
-│   └── beta/values.yaml            único archivo editable por cliente-beta (httpbin + PVC)
+│   ├── alpha/values.yaml                   único archivo editable por cliente-alpha (nginx)
+│   └── beta/values.yaml                    único archivo editable por cliente-beta (httpbin + PVC)
 ├── scripts/
-│   ├── deploy.sh                   valida, docker pull, minikube image load, helm upgrade --install
-│   └── set-permissions.sh          instala en /opt/paas con usuarios, grupos y sudoers por tenant
+│   ├── deploy.sh
+│   └── set-permissions.sh
 └── tests/
-    ├── isolation.sh                ICMP y TCP dentro del tenant y entre tenants
-    ├── quota.sh                    cuota de CPU y de PVC (KEEP=1 conserva la carga para las alertas)
-    └── ratelimit.sh                ráfaga HTTP contra el Ingress, espera mezcla de 200 y 503
+    ├── isolation.sh
+    ├── quota.sh
+    ├── ratelimit.sh
+    └── hpa.sh
 ```
 
 ### Planes y cuotas
 
 Regla: `maxReplicas x request + surge (25 %) x request <= requests.cpu de la cuota`.
 
-| Tenant | Plan | Réplicas máx. | Request / limit por pod | Rate limit | Pico con surge | Cuota CPU |
-|---|---|---|---|---|---|---|
-| alpha | standard | 8 | 150m / 300m | 50 rps, 100 conexiones | 10 x 150m = 1.5 | 2 |
-| beta | basic | 5 | 100m / 250m | 10 rps, 20 conexiones | 7 x 100m = 0.7 | 1 |
+| Tenant | Plan | Réplicas máx. | Request / limit por pod | Rate limit | Objetivo HPA (req/s por pod) | Pico con surge | Cuota CPU |
+|---|---|---|---|---|---|---|---|
+| alpha | standard | 8 | 150m / 300m | 50 rps, 100 conexiones | 20 | 10 x 150m = 1.5 | 2 |
+| beta | basic | 5 | 100m / 250m | 10 rps, 20 conexiones | 5 | 7 x 100m = 0.7 | 1 |
 
 En alpha sobran 0.5 CPU; el Deployment manual `app-cliente-alpha` (2 x 100m) usa 0.2.
 
@@ -166,6 +176,14 @@ helm upgrade prometheus prometheus-community/kube-prometheus-stack -n monitoring
   --reuse-values -f admin/monitoring/alertmanager-values.yaml
 ```
 Esperado: el grupo `paas.tenant.quota` con 3 reglas en Prometheus (`:9090/rules`); `alert-sink` en `Running`.
+
+**Paso 3b. Métricas del HPA y Tablero**
+```bash
+kubectl apply -f admin/monitoring/ingress-metrics.yaml
+helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter -n monitoring \
+  -f admin/monitoring/prometheus-adapter-values.yaml --wait
+kubectl apply -f admin/monitoring/tenants-dashboard.yaml
+```
 
 **Paso 4. Permisos.**
 ```bash

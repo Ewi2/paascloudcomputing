@@ -1,0 +1,104 @@
+# El sidecar de Grafana carga los ConfigMap con la etiqueta grafana_dashboard=1
+# y los ubica en la carpeta indicada por la anotación grafana_folder.
+#   kubectl apply -f admin/monitoring/tenants-dashboard.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paas-tenants-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: PaaS
+data:
+  paas-tenants.json: |
+    {
+      "uid": "paas-tenants",
+      "title": "PaaS - Consumo por tenant",
+      "tags": ["paas"],
+      "timezone": "browser",
+      "editable": true,
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "annotations": {"list": []},
+      "templating": {"list": [
+        {"name": "datasource", "label": "Prometheus", "type": "datasource",
+         "query": "prometheus", "hide": 0, "includeAll": false, "multi": false},
+        {"name": "namespace", "label": "Tenant", "type": "query", "refresh": 1,
+         "sort": 1, "hide": 0, "includeAll": false, "multi": false,
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "definition": "label_values(kube_resourcequota{namespace=~'tenant-.+'}, namespace)",
+         "query": {"qryType": 1, "refId": "PrometheusVariableQueryEditor-VariableQuery",
+                   "query": "label_values(kube_resourcequota{namespace=~'tenant-.+'}, namespace)"}}
+      ]},
+      "panels": [
+        {"id": 1, "type": "bargauge", "title": "Consumo frente a la cuota (%)",
+         "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100,
+           "thresholds": {"mode": "absolute", "steps": [
+             {"color": "green", "value": null}, {"color": "orange", "value": 80}, {"color": "red", "value": 100}]}},
+           "overrides": []},
+         "options": {"orientation": "horizontal", "displayMode": "gradient",
+           "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+         "targets": [{"refId": "A", "instant": true, "legendFormat": "{{resource}}",
+           "expr": "100 * sum by (resource) (kube_resourcequota{namespace='$namespace', type='used'}) / sum by (resource) (kube_resourcequota{namespace='$namespace', type='hard'})"}]},
+        {"id": 2, "type": "timeseries", "title": "Réplicas del HPA (actuales y máximo)",
+         "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+         "options": {},
+         "targets": [
+           {"refId": "A", "legendFormat": "actuales {{horizontalpodautoscaler}}",
+            "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace='$namespace'}"},
+           {"refId": "B", "legendFormat": "máximo {{horizontalpodautoscaler}}",
+            "expr": "kube_horizontalpodautoscaler_spec_max_replicas{namespace='$namespace'}"}]},
+        {"id": 3, "type": "timeseries", "title": "Peticiones HTTP/s al Ingress por código",
+         "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "reqps", "min": 0}, "overrides": []},
+         "options": {},
+         "targets": [{"refId": "A", "legendFormat": "HTTP {{status}}",
+           "expr": "sum by (status) (rate(nginx_ingress_controller_requests{namespace='$namespace'}[1m]))"}]},
+        {"id": 4, "type": "timeseries", "title": "CPU por pod (núcleos)",
+         "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+         "options": {},
+         "targets": [{"refId": "A", "legendFormat": "{{pod}}",
+           "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace='$namespace', container!=''}[5m]))"}]},
+        {"id": 5, "type": "timeseries", "title": "Memoria por pod (working set)",
+         "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+         "options": {},
+         "targets": [{"refId": "A", "legendFormat": "{{pod}}",
+           "expr": "sum by (pod) (container_memory_working_set_bytes{namespace='$namespace', container!=''})"}]},
+        {"id": 6, "type": "timeseries", "title": "Tráfico de red por tenant",
+         "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}, "overrides": []},
+         "options": {},
+         "targets": [
+           {"refId": "A", "legendFormat": "recibido",
+            "expr": "sum(rate(container_network_receive_bytes_total{namespace='$namespace', pod!=''}[5m]))"},
+           {"refId": "B", "legendFormat": "transmitido",
+            "expr": "sum(rate(container_network_transmit_bytes_total{namespace='$namespace', pod!=''}[5m]))"}]},
+        {"id": 7, "type": "timeseries", "title": "Almacenamiento usado por PVC",
+         "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+         "options": {},
+         "targets": [{"refId": "A", "legendFormat": "{{persistentvolumeclaim}}",
+           "expr": "sum by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace='$namespace'})"}]},
+        {"id": 8, "type": "timeseries", "title": "Pods por fase",
+         "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8},
+         "datasource": {"type": "prometheus", "uid": "${datasource}"},
+         "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+         "options": {},
+         "targets": [{"refId": "A", "legendFormat": "{{phase}}",
+           "expr": "sum by (phase) (kube_pod_status_phase{namespace='$namespace'} == 1)"}]}
+      ]
+    }
