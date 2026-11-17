@@ -1,0 +1,20 @@
+# Alta de tenant-alpha (Fase 1): namespace, plan y dominio base.
+#   kubectl apply -k admin/tenancy/tenants/alpha
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tenant-alpha
+resources:
+- ../../base
+components:
+- ../../plans/standard
+labels:
+- pairs:
+    paas/tenant: alpha
+patches:
+- target:
+    kind: Namespace
+  patch: |-
+    - op: add
+      path: /metadata/annotations
+      value:
+        paas/domain: alpha.paas.local   # scripts/deploy.sh exige este dominio o un subdominio

@@ -1,8 +1,8 @@
-# Enrutamiento de alertas por tenant. Aplicar sobre el stack ya instalado:
-#   helm upgrade prometheus prometheus-community/kube-prometheus-stack \
-#     -n monitoring --reuse-values -f admin/monitoring/alertmanager-values.yaml
-# Los receptores apuntan al 'alert-sink' del laboratorio; en producción reemplazar
-# webhook_configs por email_configs / slack_configs con el contacto real de cada cliente.
+# Enrutamiento de alertas: cada alerta va al receptor del cliente dueño del namespace.
+# Lo aplica scripts/bootstrap.sh monitoring junto con kube-prometheus-stack-values.yaml.
+# Alta de un tenant: agregar aquí su ruta y su receptor.
+# Los receptores apuntan al alert-sink del laboratorio. En producción se reemplaza
+# webhook_configs por email_configs o slack_configs con el contacto real de cada cliente.
 alertmanager:
   config:
     route:

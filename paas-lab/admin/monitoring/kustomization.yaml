@@ -1,0 +1,28 @@
+# Fases 3-4 - Recursos de monitoreo propios de la plataforma. Requieren kube-prometheus-stack
+# instalado (CRD PrometheusRule y ServiceMonitor); lo instala scripts/bootstrap.sh monitoring.
+#   kubectl apply -k admin/monitoring
+# Los archivos *-values.yaml de este directorio son valores de Helm, no recursos de Kustomize.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- alerts.yaml
+- alert-sink.yaml
+- ingress-metrics.yaml
+configMapGenerator:
+# El sufijo de hash del nombre reinicia alert-sink cuando cambia el código.
+- name: alert-sink-script
+  namespace: monitoring
+  files:
+  - alert-sink.py
+# El sidecar de Grafana carga los ConfigMap con grafana_dashboard=1 y los ubica en la
+# carpeta que indica la anotación grafana_folder.
+- name: paas-tenants-dashboard
+  namespace: monitoring
+  files:
+  - paas-tenants.json=tenants-dashboard.json
+  options:
+    disableNameSuffixHash: true
+    labels:
+      grafana_dashboard: "1"
+    annotations:
+      grafana_folder: PaaS

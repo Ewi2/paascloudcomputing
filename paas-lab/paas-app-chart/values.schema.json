@@ -48,8 +48,8 @@
         "targetCPU": {"type": "integer", "minimum": 10, "maximum": 95}
       }
     },
-    "plan": {"type": "string", "enum": ["basic", "standard"]},
-    "tenant": {"type": "string", "enum": ["alpha", "beta"]},
+    "plan": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$"},
+    "tenant": {"type": "string", "pattern": "^[a-z][a-z0-9]{0,20}$"},
     "ingressClassName": {"type": "string"}
   }
 }

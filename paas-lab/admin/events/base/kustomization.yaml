@@ -1,0 +1,20 @@
+# Fase 5 - Recursos de escalado por eventos comunes a todo tenant: broker RabbitMQ propio,
+# consumidor "worker", ScaledObject de KEDA y excepción de red para el operador de KEDA.
+# No se aplica sola. La incluye cada overlay de tenants/<tenant>/, que fija el namespace y el SLA.
+# Requiere KEDA instalado (CRD keda.sh) y el Secret rabbitmq-credentials en el namespace;
+# scripts/bootstrap.sh events crea ambos. El Secret nunca se versiona.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- rabbitmq.yaml
+- worker.yaml
+- scaler.yaml
+- networkpolicy.yaml
+configMapGenerator:
+# El sufijo de hash del nombre reinicia los workers cuando cambia el script.
+- name: worker-script
+  files:
+  - worker.sh
+labels:
+- pairs:
+    app.kubernetes.io/part-of: paas-events

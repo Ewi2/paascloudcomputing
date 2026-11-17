@@ -1,0 +1,45 @@
+# Credenciales del broker para KEDA: se leen del Secret, no se escriben en el ScaledObject.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: rabbitmq
+spec:
+  secretTargetRef:
+  - parameter: host
+    name: rabbitmq-credentials
+    key: AMQP_URI                  # amqp://<usuario>:<clave>@rabbitmq.<namespace>.svc.cluster.local:5672/
+---
+# KEDA activa el worker (0 -> 1) cuando hay mensajes y crea el HPA keda-hpa-worker para 1 -> N.
+# Réplicas deseadas = ceil(mensajes en cola / value), acotadas a maxReplicaCount.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0               # scale-to-zero
+  maxReplicaCount: 1               # SLA: lo fija el overlay del tenant
+  pollingInterval: 10              # segundos entre consultas a la cola (activación 0 -> 1)
+  cooldownPeriod: 20               # segundos con la cola vacía antes de volver a 0
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          # Sin tope de velocidad: de 1 a las réplicas deseadas en un ciclo del HPA. Por defecto
+          # el HPA agrega 4 pods o el 100 % cada 15 s, y una cola que se vacía en segundos
+          # nunca llegaría al máximo del SLA.
+          stabilizationWindowSeconds: 0
+          policies:
+          - type: Pods
+            value: 100
+            periodSeconds: 15
+  triggers:
+  - type: rabbitmq
+    metadata:
+      protocol: amqp
+      queueName: pedidos           # mismo valor en rabbitmq.yaml y worker.yaml
+      mode: QueueLength
+      value: "1"                   # SLA: mensajes por réplica; lo fija el overlay del tenant
+    authenticationRef:
+      name: rabbitmq

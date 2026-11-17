@@ -1,28 +1,47 @@
 #!/usr/bin/env bash
-# ResourceQuota de un tenant (CPU y storage). Uso: tests/quota.sh <alpha|beta>
-# KEEP=1 conserva el Deployment de prueba para observar las alertas de cuota (borrar después).
+# ResourceQuota de un tenant (Fase 1): comprueba que el exceso de CPU y de PVC se rechaza.
+#
+# Uso: tests/quota.sh <tenant>
+# KEEP=1 conserva los recursos de prueba para observar las alertas de cuota. Borrarlos después:
+#   kubectl -n tenant-<t> delete deployment,pvc --selector paas/test=quota
 set -uo pipefail
-T="${1:?uso: $0 <alpha|beta>}"; NS="tenant-$T"; REQ=250; fail=0
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-hard() { kubectl -n "$NS" get resourcequota paas-quota -o "jsonpath={.spec.hard.$1}"; }
-cpu="$(hard 'requests\.cpu')"; pvcs="$(hard persistentvolumeclaims)"
-case "$cpu" in *m) mcpu="${cpu%m}" ;; *) mcpu=$((cpu * 1000)) ;; esac
-REPLICAS=$((mcpu / REQ + 4))
+readonly REQUEST_MILLICPU=250          # CPU que pide cada réplica de prueba
+readonly EXTRA_REPLICAS=4              # réplicas por encima de las que caben en la cuota
+readonly SETTLE_SECONDS=20             # tiempo para que el ReplicaSet intente crear todos los pods
+readonly TENANT="${1:?uso: $0 <tenant>}"
+require_tenant "$TENANT"
+readonly NS="tenant-$TENANT"
+
+quota_hard() { kubectl -n "$NS" get resourcequota paas-quota --output "jsonpath={.spec.hard.$1}"; }
 
 cleanup() {
   [ "${KEEP:-0}" = 1 ] && return
-  kubectl -n "$NS" delete deploy quota-probe --ignore-not-found --now >/dev/null 2>&1
-  kubectl -n "$NS" delete pvc -l paas/test=quota --ignore-not-found >/dev/null 2>&1
+  kubectl -n "$NS" delete deployment,pvc --selector paas/test=quota --ignore-not-found --now >/dev/null 2>&1
 }
 trap cleanup EXIT
 
-echo "== CPU: $REPLICAS réplicas x ${REQ}m contra cuota requests.cpu=$cpu"
-kubectl -n "$NS" apply -f - >/dev/null <<EOF
+cpu_quota="$(quota_hard 'requests\.cpu')"
+pvc_quota="$(quota_hard persistentvolumeclaims)"
+case "$cpu_quota" in
+  *m) cpu_quota_milli="${cpu_quota%m}" ;;
+  *)  cpu_quota_milli=$((cpu_quota * 1000)) ;;
+esac
+replicas=$((cpu_quota_milli / REQUEST_MILLICPU + EXTRA_REPLICAS))
+
+# Los pods que la cuota admite pueden quedar en Pending (el nodo tiene menos CPU libre que la
+# cuota): no afecta a la prueba, porque la cuota se evalúa al crear el pod, antes de planificarlo.
+info "CPU: $replicas réplicas x ${REQUEST_MILLICPU}m contra la cuota requests.cpu=$cpu_quota"
+kubectl -n "$NS" apply -f - >/dev/null <<MANIFEST
 apiVersion: apps/v1
 kind: Deployment
-metadata: {name: quota-probe}
+metadata:
+  name: quota-probe
+  labels: {paas/test: quota}
 spec:
-  replicas: $REPLICAS
+  replicas: $replicas
   selector: {matchLabels: {app: quota-probe}}
   template:
     metadata: {labels: {app: quota-probe}}
@@ -31,32 +50,38 @@ spec:
       - name: pause
         image: registry.k8s.io/pause:3.9
         resources:
-          requests: {cpu: ${REQ}m, memory: 32Mi}
-          limits: {cpu: ${REQ}m, memory: 32Mi}
-EOF
-sleep 20
-if kubectl -n "$NS" get events --field-selector reason=FailedCreate -o jsonpath='{.items[*].message}' | grep -q 'quota-probe.*exceeded quota'; then
-  echo "PASS  el ReplicaSet recibió 'exceeded quota' al superar la cuota de CPU"
+          requests: {cpu: ${REQUEST_MILLICPU}m, memory: 32Mi}
+          limits: {cpu: ${REQUEST_MILLICPU}m, memory: 32Mi}
+MANIFEST
+sleep "$SETTLE_SECONDS"
+if kubectl -n "$NS" get events --field-selector reason=FailedCreate --output 'jsonpath={.items[*].message}' \
+    | grep -q 'quota-probe.*exceeded quota'; then
+  pass "el ReplicaSet recibió 'exceeded quota' al superar la cuota"
 else
-  echo "FAIL  no se registró 'exceeded quota' (kubectl -n $NS describe rs)"; fail=1
+  fail "no se registró 'exceeded quota' (kubectl -n $NS describe replicaset)"
 fi
 
-echo "== Storage: creando $((pvcs + 1)) PVC de 100Mi contra persistentvolumeclaims=$pvcs"
-out=""
-for i in $(seq $((pvcs + 1))); do
-  out="$(kubectl -n "$NS" apply -f - 2>&1 <<EOF
+info "Storage: $((pvc_quota + 1)) PVC de 100Mi contra la cuota persistentvolumeclaims=$pvc_quota"
+last_output=""
+for i in $(seq $((pvc_quota + 1))); do
+  last_output="$(kubectl -n "$NS" apply -f - 2>&1 <<MANIFEST
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: quota-pvc-$i, labels: {paas/test: quota}}
-spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 100Mi}}}
-EOF
+metadata:
+  name: quota-probe-$i
+  labels: {paas/test: quota}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 100Mi}}
+MANIFEST
 )"
 done
-if grep -q 'exceeded quota' <<<"$out"; then
-  echo "PASS  el último PVC fue rechazado por la cuota"
+if grep -q 'exceeded quota' <<<"$last_output"; then
+  pass "el último PVC fue rechazado por la cuota"
 else
-  echo "FAIL  el último PVC no fue rechazado: $out"; fail=1
+  fail "el último PVC no fue rechazado: $last_output"
 fi
 
-echo; kubectl -n "$NS" describe resourcequota paas-quota | sed -n '1,25p'
-exit "$fail"
+echo
+kubectl -n "$NS" describe resourcequota paas-quota
+finish

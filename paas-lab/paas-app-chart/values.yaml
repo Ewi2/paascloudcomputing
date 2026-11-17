@@ -5,8 +5,8 @@
 port: 80
 replicaCount: 1
 
-env: {}          # variables no sensibles  -> ConfigMap
-secretEnv: {}    # variables sensibles     -> Secret
+env: {}          # variables no sensibles -> ConfigMap
+secretEnv: {}    # variables sensibles    -> Secret
 
 persistence:
   enabled: false
@@ -18,6 +18,6 @@ autoscaling:
   maxReplicas: 2
   targetCPU: 70
 
-# Los fija el administrador desde scripts/deploy.sh (--set-string); el cliente no los controla.
+# Los impone scripts/deploy.sh con --set-string; prevalecen sobre el archivo del cliente.
 plan: basic
 ingressClassName: nginx

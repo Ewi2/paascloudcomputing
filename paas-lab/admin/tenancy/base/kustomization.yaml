@@ -1,0 +1,8 @@
+# Fase 1 - Recursos comunes a todo tenant: Namespace y aislamiento de red.
+# No se aplica sola. La incluye cada overlay de tenants/<tenant>/, que fija el namespace
+# (Kustomize también renombra el objeto Namespace) y agrega el plan (cuota y LimitRange).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- namespace.yaml
+- networkpolicies.yaml

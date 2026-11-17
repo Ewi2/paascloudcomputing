@@ -1,0 +1,23 @@
+# Excepción a default-deny-ingress (Fase 1): el operador de KEDA, en el namespace keda,
+# consulta la longitud de la cola por AMQP. Solo pods del operador, solo hacia el broker y
+# solo al puerto 5672. El aislamiento entre tenants no cambia: otro tenant sigue sin acceso.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-keda-to-rabbitmq
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: keda
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: keda-operator
+    ports:
+    - protocol: TCP
+      port: 5672

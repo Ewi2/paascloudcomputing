@@ -1,20 +1,41 @@
-# El label 'release: prometheus' hace que el Prometheus de kube-prometheus-stack lo seleccione
-# (mismo criterio que alerts.yaml).
-#   kubectl apply -f admin/monitoring/ingress-metrics.yaml
+# Métricas del NGINX Ingress Controller para el HPA por peticiones (Fase 3) y el tablero (Fase 4).
+# El addon "ingress" de Minikube expone las métricas en el puerto 10254 del pod, pero no lo
+# declara ni crea un Service para él: este Service lo publica y el ServiceMonitor lo registra.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller-metrics
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller-metrics
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+  ports:
+  - name: metrics
+    port: 10254
+    targetPort: 10254
+---
 apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
+kind: ServiceMonitor
 metadata:
   name: ingress-nginx
   namespace: monitoring
   labels:
-    release: prometheus
+    release: prometheus            # selector por defecto del Prometheus de kube-prometheus-stack
 spec:
   namespaceSelector:
     matchNames: [ingress-nginx]
   selector:
     matchLabels:
-      app.kubernetes.io/name: ingress-nginx
-  podMetricsEndpoints:
-  - targetPort: 10254        # puerto de métricas del NGINX Ingress Controller
+      app.kubernetes.io/component: controller-metrics
+  endpoints:
+  - port: metrics
     path: /metrics
     interval: 15s
+    # Conserva la etiqueta "namespace" de la métrica (namespace del Ingress, es decir, del tenant).
+    # Sin esto Prometheus la renombra a exported_namespace y el HPA y el tablero no la encuentran.
+    honorLabels: true

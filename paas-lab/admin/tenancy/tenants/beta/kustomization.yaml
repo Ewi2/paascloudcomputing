@@ -1,0 +1,20 @@
+# Alta de tenant-beta (Fase 1): namespace, plan y dominio base.
+#   kubectl apply -k admin/tenancy/tenants/beta
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tenant-beta
+resources:
+- ../../base
+components:
+- ../../plans/basic
+labels:
+- pairs:
+    paas/tenant: beta
+patches:
+- target:
+    kind: Namespace
+  patch: |-
+    - op: add
+      path: /metadata/annotations
+      value:
+        paas/domain: beta.paas.local   # scripts/deploy.sh exige este dominio o un subdominio

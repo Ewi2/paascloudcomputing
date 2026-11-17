@@ -1,0 +1,94 @@
+# Broker de mensajería del tenant: una instancia por namespace, sin persistencia (laboratorio).
+# Puertos: 5672 (AMQP, lo consulta KEDA) y 15672 (API HTTP de administración, la usa el worker).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  labels:
+    app.kubernetes.io/name: rabbitmq
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate                 # nunca dos brokers a la vez
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rabbitmq
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.13-management-alpine   # incluye rabbitmqadmin
+        ports:
+        - name: amqp
+          containerPort: 5672
+        - name: http
+          containerPort: 15672
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          valueFrom:
+            secretKeyRef: {name: rabbitmq-credentials, key: RABBITMQ_DEFAULT_USER}
+        - name: RABBITMQ_DEFAULT_PASS
+          valueFrom:
+            secretKeyRef: {name: rabbitmq-credentials, key: RABBITMQ_DEFAULT_PASS}
+        - name: QUEUE_NAME
+          value: pedidos           # mismo valor en worker.yaml y scaler.yaml
+        lifecycle:
+          postStart:
+            exec:
+              # Declara la cola en cuanto la API de administración responde (operación
+              # idempotente). Así la cola existe siempre que el broker está en servicio y
+              # KEDA puede consultarla aunque todavía no haya productores ni consumidores.
+              command:
+              - sh
+              - -c
+              - |
+                for _ in $(seq 60); do
+                  rabbitmqadmin --username="$RABBITMQ_DEFAULT_USER" --password="$RABBITMQ_DEFAULT_PASS" \
+                    declare queue name="$QUEUE_NAME" durable=true >/dev/null 2>&1 && exit 0
+                  sleep 3
+                done
+                echo "no se pudo declarar la cola $QUEUE_NAME" >&2
+                exit 1
+        resources:
+          requests: {cpu: 50m, memory: 160Mi}
+          limits: {cpu: 500m, memory: 512Mi}
+        readinessProbe:            # TCP: las sondas con rabbitmq-diagnostics inician una VM de Erlang por ejecución
+          tcpSocket:
+            port: amqp
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/rabbitmq
+      volumes:
+      - name: data
+        emptyDir:
+          sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    app.kubernetes.io/name: rabbitmq
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: rabbitmq
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: amqp
+  - name: http
+    port: 15672
+    targetPort: http
