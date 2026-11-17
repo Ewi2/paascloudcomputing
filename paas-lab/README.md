@@ -1,109 +1,171 @@
-# PaaS multi-tenant sobre Kubernetes - Fases 1 a 4
+# PaaS multi-tenant sobre Kubernetes (`paas-lab`)
 
-```
-admin/                 root:root. Fase 1: Namespace, ResourceQuota, LimitRange, NetworkPolicy por tenant
-  monitoring/          Fases 3-4: alertas, enrutamiento, métricas del Ingress, Prometheus Adapter y tablero
-  tenants.env          plan y dominio base por tenant (los fija el administrador)
-paas-app-chart/        root:root. Fases 2-3: Deployment, Service, Ingress, HPA, ConfigMap/Secret, PVC
-  plans.yaml           límites por plan (réplicas, recursos, solicitudes HTTP, objetivo del HPA)
-  values.schema.json   validación de lo que el cliente puede escribir
-tenants/<t>/values.yaml  ÚNICO archivo del cliente (dueño: cliente-<t>)
-scripts/deploy.sh      valida, docker pull, minikube image load, helm upgrade --install
-scripts/set-permissions.sh  instala en /opt/paas con usuarios, grupos y sudoers por tenant
-tests/                 isolation.sh, quota.sh, ratelimit.sh, hpa.sh
-```
+Plataforma como servicio de laboratorio para la materia Informática en la Nube. Dos clientes (`alpha` y `beta`) comparten un clúster Minikube; cada uno despliega su aplicación editando un solo archivo, dentro de los límites de su plan.
 
-## Decisiones
+| Fase | Qué aporta | Dónde está |
+|---|---|---|
+| 1. Aislamiento | Namespace, ResourceQuota, LimitRange y NetworkPolicy por tenant | `admin/tenancy/` |
+| 2. Abstracción | Chart de Helm; el cliente solo edita `tenants/<tenant>/values.yaml` | `paas-app-chart/`, `scripts/deploy.sh` |
+| 3. Elasticidad | HPA por CPU y por peticiones/s del Ingress | `paas-app-chart/templates/hpa.yaml`, `admin/monitoring/` |
+| 4. Telemetría | Prometheus, Grafana (tablero por tenant) y alertas enrutadas a cada cliente | `admin/monitoring/` |
+| 5. Eventos | KEDA y un RabbitMQ por tenant; el consumidor escala de 0 a N y vuelve a 0 | `admin/events/` |
 
-- **Solicitudes HTTP:** el límite va en el Ingress (`limit-rps`, `limit-connections`), no en el LimitRange. Lo define el plan, no el cliente. NGINX lo aplica por IP de origen y responde 503.
-- **Autoescalado (Fase 3):** HPA v2 con dos métricas. CPU por Metrics Server (objetivo elegido por el cliente, 10-95 %) y peticiones/s del Ingress por Prometheus Adapter (objetivo fijado por el plan).
-- **Observabilidad (Fase 4):** un tablero de Grafana con la variable `$namespace`, provisionado como ConfigMap con la etiqueta `grafana_dashboard=1`.
-- **Alerta automática:** `PrometheusRule` (cuota >= 80 %, cuota agotada, HPA en su máximo). Alertmanager enruta por `namespace` al receptor de cada cliente.
-- **Entrada de la aplicación:** solo imagen con tag explícito o digest. `deploy.sh` hace `docker pull` y `minikube image load`. El camino Dockerfile no se implementa.
-- **Cliente:** `image`, `replicaCount`, `env`/`secretEnv`, `domain` (más `port`, `persistence`, `autoscaling`). `replicaCount` y `autoscaling.maxReplicas` no pueden superar el máximo del plan.
-- **Plan y tenant:** los impone `deploy.sh` con `--set-string`; prevalecen sobre el archivo del cliente.
+La referencia completa (árbol, origen de cada dato, presupuesto de recursos, decisiones y límites) está en [ESTRUCTURA.md](ESTRUCTURA.md).
 
-## Prerrequisitos
+## 1. Máquina virtual
 
-Con la guía HTML ya ejecutada (Minikube + `kube-prometheus-stack` con release `prometheus`):
+| Parámetro | Valor |
+|---|---|
+| Hipervisor | VMware |
+| Sistema operativo | Ubuntu Server 22.04 LTS (amd64) |
+| CPU y memoria | 2 núcleos, 4 GB |
+| Disco | 40 GB |
+
+Dos ajustes después de instalar Ubuntu:
 
 ```bash
-# NetworkPolicy exige un CNI que la aplique. Si el clúster se creó sin --cni hay que recrearlo:
-minikube delete
-minikube start --driver=docker --cpus=4 --memory=8192mb --cni=calico
-minikube addons enable ingress
-minikube addons enable metrics-server
-# (reinstalar kube-prometheus-stack tras recrear el clúster, pasos 4-5 de la guía HTML)
-echo "$(minikube ip) alpha.paas.local beta.paas.local" | sudo tee -a /etc/hosts
-sudo apt install -y python3-yaml
+# Con LVM, el instalador suele asignar al volumen raíz solo la mitad del disco. Usar los 40 GB:
+df -h /
+sudo lvextend --resizefs --extents +100%FREE "$(findmnt --noheadings --output SOURCE /)"
+
+# Debe existir swap (el instalador crea /swap.img). Si la salida está vacía, install-host.sh indica cómo crearla.
+swapon --show
 ```
 
-## Ejecución
+## 2. Instalación
+
+Desde la cuenta administradora, en la raíz de `paas-lab/`:
 
 ```bash
-kubectl apply -f admin/tenant-alpha.yaml -f admin/tenant-beta.yaml
-kubectl apply -f admin/monitoring/alerts.yaml -f admin/monitoring/alert-sink.yaml
-helm upgrade prometheus prometheus-community/kube-prometheus-stack -n monitoring \
-  --reuse-values -f admin/monitoring/alertmanager-values.yaml
+sudo scripts/install-host.sh       # Docker, Minikube, kubectl, Helm y parámetros del kernel
+# Cerrar la sesión y volver a entrar (grupo docker).
 
-kubectl apply -f admin/monitoring/ingress-metrics.yaml
-helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter -n monitoring \
-  -f admin/monitoring/prometheus-adapter-values.yaml --wait
-kubectl apply -f admin/monitoring/tenants-dashboard.yaml
+scripts/bootstrap.sh all           # clúster, Fase 1, monitoreo y /etc/hosts (10-15 min la primera vez)
+scripts/bootstrap.sh status        # CPU y memoria reservadas en el nodo
+```
 
-sudo scripts/set-permissions.sh     # copia el código a /opt/paas; repetir tras cada cambio
+`bootstrap.sh` acepta etapas sueltas (`cluster`, `tenancy`, `monitoring`, `hosts`, `events`, `status`) y cada una se puede repetir. El clúster se crea con el CNI Calico: el CNI por defecto de Minikube no aplica NetworkPolicy. Si ya existe un clúster sin Calico, hay que recrearlo (`minikube delete`).
+
+## 3. Permisos y despliegue de los clientes
+
+```bash
+sudo scripts/set-permissions.sh    # crea cliente-alpha y cliente-beta; instala /opt/paas
+```
+
+| Ruta en `/opt/paas` | Propietario y modo | Efecto |
+|---|---|---|
+| `paas-app-chart/`, `scripts/deploy.sh` | `root:root`, 755/644 | Solo lectura para los clientes |
+| `tenants/<t>/` | `root:cliente-<t>`, 0750 | El cliente entra; no crea ni renombra archivos |
+| `tenants/<t>/values.yaml` | `cliente-<t>:cliente-<t>`, 0640 | El cliente lo edita; el administrador lo lee por grupo; el otro tenant no accede |
+| `/etc/sudoers.d/paas-<t>` | `root`, 0440 | El cliente solo ejecuta `deploy.sh <t>` como el administrador |
+
+Los clientes no pertenecen al grupo `docker` ni tienen kubeconfig. Cada cliente ve su archivo en `~/values.yaml` (enlace simbólico).
+
+```bash
+# Como cliente (sesión de cliente-alpha):
+nano ~/values.yaml
+sudo -u <administrador> /opt/paas/scripts/deploy.sh alpha
+
+# Lo mismo simulado desde la sesión del administrador:
 sudo -u cliente-alpha sudo -u "$USER" /opt/paas/scripts/deploy.sh alpha
 sudo -u cliente-beta  sudo -u "$USER" /opt/paas/scripts/deploy.sh beta
 
-tests/isolation.sh
-tests/quota.sh alpha            # KEEP=1 para dejar la carga y ver las alertas
-tests/quota.sh beta
-tests/hpa.sh alpha              # autoescalado por peticiones del Ingress
-tests/hpa.sh beta
-tests/ratelimit.sh alpha.paas.local
-kubectl logs -n monitoring deploy/alert-sink
+curl -s -o /dev/null -w '%{http_code}\n' http://alpha.paas.local/
+curl -s -o /dev/null -w '%{http_code}\n' http://beta.paas.local/
 ```
 
-## Verificación de las Fases 3 y 4
+`deploy.sh` rechaza con un mensaje claro: imagen sin tag, dominio de otro tenant, réplicas por encima del plan y valores de `env` sin comillas.
+
+Comprobación de permisos (las tres deben fallar):
 
 ```bash
-# Métrica personalizada disponible (AVAILABLE = True)
-kubectl get apiservice v1beta1.custom.metrics.k8s.io
-
-# El controlador expone métricas (port-forward en segundo plano)
-kubectl -n ingress-nginx port-forward deploy/ingress-nginx-controller 10254:10254 &
-curl -s localhost:10254/metrics | grep -m1 nginx_ingress_controller_requests
-
-# HPA con las dos métricas (CPU y ingress_requests_per_second)
-kubectl -n tenant-alpha get hpa
+sudo -u cliente-beta cat /opt/paas/tenants/alpha/values.yaml
+sudo -u cliente-alpha touch /opt/paas/tenants/alpha/otro.yaml
+sudo -u cliente-alpha docker ps
 ```
 
-## Coherencia plan - cuota
+## 4. Pruebas de las Fases 1 a 4
 
-`maxReplicas x requests.cpu + surge (25 %) x requests.cpu <= requests.cpu de la cuota`
+```bash
+tests/isolation.sh                    # red: alpha y beta no se alcanzan (ICMP y TCP)
+tests/quota.sh alpha                  # la cuota rechaza el exceso de CPU y de PVC
+tests/quota.sh beta
+tests/ratelimit.sh alpha.paas.local   # mezcla de 200 y 503 por el límite del plan
+tests/hpa.sh alpha                    # el HPA escala por peticiones del Ingress
+tests/hpa.sh beta
+```
 
-| Tenant | Plan | Réplicas máx. | Request CPU | Pico con surge | Cuota CPU | Objetivo HPA (req/s por pod) |
-|---|---|---|---|---|---|---|
-| alpha | standard | 8 | 150m | 10 x 150m = 1.5 | 2 | 20 |
-| beta | basic | 5 | 100m | 7 x 100m = 0.7 | 1 | 5 |
+Alertas automáticas al cliente:
 
-## Límites conocidos
+```bash
+KEEP=1 tests/quota.sh alpha                               # deja la cuota al límite
+kubectl logs -n monitoring deploy/alert-sink --tail=20    # tras 2-3 minutos
+kubectl -n tenant-alpha delete deployment,pvc --selector paas/test=quota
+```
 
-- Si `alpha` ya tiene un Service o Deployment llamado como `appName`, `helm install` falla: elimínalo o cambia `appName`.
-- El rate limit solo aplica al tráfico que entra por el Ingress. La prueba de carga de la guía (`wget` al Service interno) lo evita.
-- `limit-rps` es por IP de origen, no por tenant completo.
-- ARP es L2 y queda fuera de NetworkPolicy; `tests/isolation.sh` verifica ICMP y TCP.
-- El nodo de Minikube (4 CPU) no cubre cuotas de 3 CPU más el stack de monitoreo sin margen; las cuotas no reservan capacidad.
-- El HPA por Ingress ve solo el tráfico que cada origen puede enviar dentro de `limit-rps`. Desde una máquina llega a `ceil(rps / objetivo)` réplicas.
-- La métrica excluye 5xx, así que los 503 del límite por IP no provocan escalado.
-- Sin Prometheus Adapter, el HPA mantiene el escalado por CPU y muestra `<unknown>` en la métrica del Ingress.
-- El tablero de Grafana es solo para el administrador. Los clientes no tienen acceso a él.
+Salida esperada: `[/alpha] firing TenantQuotaNearLimit ns=tenant-alpha resource=requests.cpu ...` y `[/alpha] firing TenantQuotaExhausted ns=tenant-alpha resource=persistentvolumeclaims ...`.
 
----
+## 5. Fase 5: escalado por eventos
 
-## Preguntas antes de cerrar
+```bash
+scripts/bootstrap.sh events           # KEDA, credenciales y RabbitMQ + worker por tenant
+tests/keda.sh beta                    # 50 mensajes: 0 -> N workers -> cola vacía -> 0
+tests/keda.sh alpha
+kubectl -n tenant-beta logs --selector app.kubernetes.io/name=worker --tail=20   # mientras haya workers
+```
 
-1. **Objetivos del HPA:** 5 req/s por pod en `basic` y 20 en `standard` son valores de laboratorio que elegí. ¿Los mantenemos o prefieres otros?
-2. **Acceso de los clientes al tablero:** hoy solo lo ve el administrador. Si cada cliente debe ver su namespace, Grafana necesita organizaciones o equipos con permisos distintos. Lo dejaría para un bloque aparte.
-3. **Métrica del HPA:** excluí los 5xx, incluidos los 503 del límite. ¿Lo confirmas o prefieres contar todas las respuestas?
-4. **Desafío A (costos):** la guía HTML cobra $0.05 por CPU-hora y $0.01 por GB-hora de RAM. ¿Lo agrego como panel de Showback en este tablero? No estaba en la descripción de la Fase 4, así que no lo incluí.
+| Tenant | SLA de eventos | Máximo de workers | Mensajes por réplica |
+|---|---|---|---|
+| alpha | Estándar | 5 | 5 |
+| beta | Alta capacidad | 15 | 2 |
+
+En otra terminal, `kubectl get pods -n tenant-beta -w` muestra el ciclo completo. Mientras `tests/keda.sh beta` corre, `tenant-alpha` permanece en 0 workers.
+
+Con 2 núcleos no caben a la vez el máximo de workers de beta y el máximo del HPA de las dos aplicaciones: ejecutar `tests/hpa.sh` y `tests/keda.sh beta` por separado.
+
+## 6. Acceso desde el equipo anfitrión
+
+La IP de Minikube solo es alcanzable dentro de la VM. Para abrir las consolas desde el navegador del equipo físico (`<IP-VM>` es la dirección de la VM en VMware):
+
+```bash
+kubectl -n monitoring port-forward --address 0.0.0.0 svc/prometheus-grafana 3000:80 &
+kubectl -n monitoring port-forward --address 0.0.0.0 svc/prometheus-kube-prometheus-prometheus 9090:9090 &
+kubectl -n ingress-nginx port-forward --address 0.0.0.0 svc/ingress-nginx-controller 8080:80 &
+```
+
+- Grafana: `http://<IP-VM>:3000` (usuario `admin`; clave `admin` o la de `GRAFANA_ADMIN_PASSWORD`). Tablero: carpeta **PaaS**, "PaaS - Consumo por tenant", variable **Tenant**.
+- Prometheus: `http://<IP-VM>:9090`.
+- Aplicaciones: agregar `<IP-VM> alpha.paas.local beta.paas.local` al archivo `hosts` del equipo físico y abrir `http://alpha.paas.local:8080`.
+
+## 7. Operación
+
+**Alta de un tenant** (`gamma`, por ejemplo):
+
+1. `admin/tenancy/tenants/gamma/kustomization.yaml`: copiar el de `beta`; cambiar tenant, plan y dominio.
+2. `tenants/gamma/values.yaml`: archivo inicial del cliente.
+3. `admin/monitoring/alertmanager-values.yaml`: agregar su ruta y su receptor.
+4. Opcional (Fase 5): `admin/events/tenants/gamma/kustomization.yaml` con su SLA.
+5. Aplicar: `scripts/bootstrap.sh tenancy monitoring hosts` (y `events`), y después `sudo scripts/set-permissions.sh`.
+
+**Cambiar el plan de un tenant:** editar `components:` en su `kustomization.yaml` de `admin/tenancy/tenants/`, ejecutar `scripts/bootstrap.sh tenancy` y volver a desplegar su aplicación.
+
+**Limpieza:**
+
+```bash
+helm uninstall <appName> -n tenant-<t>            # aplicación de un cliente
+kubectl delete -k admin/events/tenants/<t>        # Fase 5 de un tenant
+helm uninstall keda -n keda                       # KEDA
+minikube stop                                     # conserva el clúster
+minikube delete                                   # borra el clúster completo
+```
+
+## 8. Estado de verificación
+
+Este repositorio no se ha ejecutado todavía en un clúster real. Se validó sin clúster:
+
+- Render de las plantillas con Helm 3.19 y Helm 4.3, y de los overlays con Kustomize 5.8 (kubectl 1.37).
+- `kubeconform -strict` sobre los 46 recursos generados, incluidos los CRD de KEDA y de Prometheus Operator.
+- Los archivos `*-values.yaml` contra los charts kube-prometheus-stack 93.3.1, prometheus-adapter 5.4.2 y keda 2.21.1 (las versiones que fija `bootstrap.sh`).
+- `shellcheck` en todos los scripts; `deploy.sh`, `tests/hpa.sh` y `tests/keda.sh` con herramientas simuladas; `worker.sh` contra una API de RabbitMQ simulada.
+
+Lo que solo se comprueba en la VM: Calico y las NetworkPolicy, el límite de tasa del Ingress, las métricas del HPA, el arranque de RabbitMQ y de KEDA, `install-host.sh` y `set-permissions.sh`.

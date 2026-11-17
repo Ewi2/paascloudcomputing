@@ -1,0 +1,10 @@
+# Plan "basic", parte de namespace: cuota agregada y límites por contenedor.
+# La parte de aplicación (réplicas, recursos por pod, tasa HTTP) está en paas-app-chart/plans.yaml.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- resourcequota.yaml
+- limitrange.yaml
+labels:
+- pairs:
+    paas/plan: basic                # scripts/deploy.sh lee esta etiqueta del Namespace

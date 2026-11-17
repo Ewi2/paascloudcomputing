@@ -1,0 +1,12 @@
+# Recursos de KEDA para la VM del laboratorio (2 vCPU, 4 GB). Los valores por defecto del
+# chart reservan 100m y 100Mi por componente. Lo instala scripts/bootstrap.sh events.
+resources:
+  operator:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+  metricServer:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+  webhooks:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 128Mi}

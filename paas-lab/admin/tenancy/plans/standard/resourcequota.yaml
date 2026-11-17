@@ -1,0 +1,17 @@
+# Tope agregado del tenant. CPU y memoria de "requests" son los valores de la guía del laboratorio.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: paas-quota
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    requests.storage: 10Gi
+    persistentvolumeclaims: "2"
+    pods: "30"
+    services.nodeports: "0"
+    services.loadbalancers: "0"
+    count/ingresses.networking.k8s.io: "2"

@@ -1,3 +1,5 @@
-# Archivos xd
-PLAN.md
-README.md
+# Artefactos locales: paquetes de entrega y credenciales. Los Secret se crean en el clúster
+# (scripts/bootstrap.sh events) y nunca se versionan.
+*.zip
+*.tgz
+*.env

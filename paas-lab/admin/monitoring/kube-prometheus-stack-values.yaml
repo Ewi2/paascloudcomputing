@@ -1,0 +1,77 @@
+# Perfil de kube-prometheus-stack para la VM del laboratorio (2 vCPU, 4 GB) sobre Minikube.
+# Lo aplica scripts/bootstrap.sh monitoring junto con alertmanager-values.yaml.
+# Todo componente declara requests: el scheduler reparte la CPU del nodo por requests.
+
+# Minikube publica estos componentes solo en 127.0.0.1 del nodo: no se pueden recolectar
+# y sus alertas quedarían disparadas de forma permanente. Las métricas del API server se
+# omiten por volumen (histogramas con miles de series que el laboratorio no usa).
+kubeApiServer:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+defaultRules:
+  rules:
+    etcd: false
+    kubeApiserverAvailability: false
+    kubeApiserverBurnrate: false
+    kubeApiserverHistogram: false
+    kubeApiserverSlos: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    windows: false
+
+prometheus:
+  prometheusSpec:
+    retention: 6h                  # suficiente para una sesión de laboratorio
+    retentionSize: 1GB
+    resources:
+      requests: {cpu: 100m, memory: 400Mi}
+      limits: {cpu: 500m, memory: 768Mi}
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 96Mi}
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 20m, memory: 48Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+  prometheusConfigReloader:        # sidecar de Prometheus y de Alertmanager
+    resources:
+      requests: {cpu: 5m, memory: 16Mi}
+      limits: {cpu: 50m, memory: 48Mi}
+
+grafana:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 300m, memory: 384Mi}
+  sidecar:
+    resources:
+      requests: {cpu: 5m, memory: 64Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+    dashboards:
+      # Los tableros con la anotación grafana_folder van a esa carpeta (tablero "PaaS").
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+
+kube-state-metrics:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 96Mi}
+
+prometheus-node-exporter:
+  resources:
+    requests: {cpu: 10m, memory: 16Mi}
+    limits: {cpu: 100m, memory: 48Mi}

@@ -1,7 +1,6 @@
-# Alertas automáticas por tenant (se evalúan en Prometheus, se enrutan en Alertmanager).
-#   kubectl apply -f admin/monitoring/alerts.yaml
-# Va en el namespace 'monitoring' con label release=prometheus: es el selector por defecto
-# de kube-prometheus-stack instalado con 'helm install prometheus ...'.
+# Alertas automáticas por tenant: Prometheus las evalúa y Alertmanager las enruta por namespace.
+# La etiqueta release=prometheus es el selector de reglas por defecto de kube-prometheus-stack
+# instalado con el nombre de release "prometheus".
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

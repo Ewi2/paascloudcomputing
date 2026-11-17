@@ -1,4 +1,5 @@
-# Único archivo editable por el cliente beta (aplicación Python/Flask, no un servidor web estático).
+# Único archivo editable por el cliente beta (plan basic: hasta 2 réplicas).
+# Aplicación Python/Flask con volumen: otra tecnología que la de alpha.
 appName: api-httpbin
 image: "kennethreitz/httpbin:latest"
 port: 80
@@ -11,11 +12,12 @@ env:                             # no sensibles (se guardan en un ConfigMap)
 # secretEnv:                     # sensibles: claves, tokens (se guardan en un Secret)
 #   API_KEY: "cambiar-esto"
 
-persistence:                     # volumen del cliente (consume la cuota de storage de beta)
+persistence:                     # volumen del cliente (consume la cuota de storage del tenant)
   enabled: true
   size: 1Gi
   mountPath: /data
+
 autoscaling:
   enabled: true
-  maxReplicas: 5
+  maxReplicas: 2
   targetCPU: 70

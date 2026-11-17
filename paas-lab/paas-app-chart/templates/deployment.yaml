@@ -10,6 +10,7 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ int .Values.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       {{- include "paas.selector" . | nindent 6 }}

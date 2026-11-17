@@ -1,26 +1,32 @@
-# Planes del proveedor. Regla de coherencia con la ResourceQuota del tenant:
-#   maxReplicas * requests.cpu + maxSurge (25 %, redondeado arriba) * requests.cpu <= quota requests.cpu
-
-# scaling.ingressRpsPerPod: peticiones/s por pod que fijan el objetivo del HPA por Ingress.
-#   Debe quedar por debajo de rateLimit.rps: un solo origen no supera rateLimit.rps, así que
-#   desde una máquina el HPA llega a ceil(rateLimit.rps / ingressRpsPerPod) réplicas.
+# Planes del proveedor, parte de aplicación. La parte de namespace (ResourceQuota, LimitRange)
+# está en admin/tenancy/plans/<plan>/. Valores dimensionados para la VM de 2 vCPU y 4 GB.
+#
+# Reglas de coherencia (verificarlas al modificar un plan):
+#   1. Cuota: (maxReplicas + maxSurge) x requests.cpu <= requests.cpu de la cuota del plan.
+#             maxSurge = 25 % de maxReplicas, redondeado hacia arriba (RollingUpdate por defecto).
+#   2. Nodo:  suma de maxReplicas x requests.cpu de todos los tenants <= CPU libre del nodo
+#             (~0.5 CPU con plano de control, Calico, Ingress y monitoreo; ver ESTRUCTURA.md).
+#   3. HPA:   ceil(rateLimit.rps / scaling.ingressRpsPerPod) <= maxReplicas.
+#             Un origen no supera rateLimit.rps, así que desde una sola máquina el HPA por
+#             Ingress llega como mucho a esa cantidad de réplicas.
 
 basic:
-  maxReplicas: 5
+  maxReplicas: 2
   resources:
-    requests: {cpu: 100m, memory: 128Mi}
-    limits: {cpu: 250m, memory: 256Mi}
-  rateLimit:            # límite de solicitudes HTTP por IP de origen en el Ingress
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 192Mi}
+  rateLimit:              # solicitudes HTTP por IP de origen en el Ingress
     rps: 10
     connections: 20
     burstMultiplier: 1
-  scaling:              # objetivo del HPA por Ingress (lo fija el proveedor, no el cliente)
+  scaling:                # objetivo del HPA por Ingress (lo fija el proveedor, no el cliente)
     ingressRpsPerPod: 5
+
 standard:
-  maxReplicas: 8
+  maxReplicas: 3
   resources:
-    requests: {cpu: 150m, memory: 192Mi}
-    limits: {cpu: 300m, memory: 384Mi}
+    requests: {cpu: 75m, memory: 96Mi}
+    limits: {cpu: 300m, memory: 256Mi}
   rateLimit:
     rps: 50
     connections: 100
