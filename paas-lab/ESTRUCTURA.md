@@ -287,9 +287,9 @@ Las variables de entorno van a un ConfigMap (`env`) o a un Secret (`secretEnv`).
 Diferencias deliberadas:
 
 - **Sin credenciales `guest`.** Usuario `paas` con clave aleatoria por tenant.
-- **`pollingInterval: 10`** en lugar de 30 (valor por defecto): la activación 0 → 1 tarda como mucho 10 s.
+- **`pollingInterval: 10`** en lugar de 30 (valor por defecto): KEDA detecta los mensajes en 10 s como mucho; a eso se suma el arranque del primer pod.
 - **Subida sin tope de velocidad.** Por defecto el HPA agrega 4 pods o el 100 % cada 15 s. Con un consumidor real la cola se vacía antes de que el HPA llegue al máximo; la política `scaleUp` de `scaler.yaml` permite ir de 1 a las réplicas deseadas en un ciclo.
-- **Publicación en ráfaga.** `tests/keda.sh` publica todos los mensajes en uno o dos segundos. Con 50 `kubectl exec` sucesivos, los workers consumen al ritmo de llegada y el pico de réplicas es menor.
+- **Publicación en ráfaga.** `tests/keda.sh` publica todos los mensajes en pocos segundos, dentro del pod del broker. Con 50 `kubectl exec` sucesivos, los workers consumen al ritmo de llegada y el pico de réplicas es menor.
 - **NetworkPolicy adicional**, necesaria porque la Fase 1 niega la entrada desde otros namespaces.
 - **El worker termina al recibir SIGTERM.** Sin el `trap` de `worker.sh`, cada pod agotaría su periodo de gracia antes de desaparecer al reducir réplicas.
 
