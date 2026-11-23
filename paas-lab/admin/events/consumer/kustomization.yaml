@@ -1,0 +1,12 @@
+# Consumidor de una cola: Deployment "worker" y su ScaledObject. Es una unidad reutilizable:
+# base/ la incluye tal cual (cola estándar) y priority/vip/ la incluye con el sufijo -vip.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- worker.yaml
+- scaler.yaml
+configMapGenerator:
+# El sufijo de hash del nombre reinicia los workers cuando cambia el script.
+- name: worker-script
+  files:
+  - worker.sh

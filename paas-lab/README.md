@@ -10,7 +10,7 @@ Plataforma como servicio de laboratorio para la materia Informática en la Nube.
 | 4. Telemetría | Prometheus, Grafana (tablero por tenant) y alertas enrutadas a cada cliente | `admin/monitoring/` |
 | 5. Eventos | KEDA y un RabbitMQ por tenant; el consumidor escala de 0 a N y vuelve a 0 | `admin/events/` |
 
-La referencia completa (árbol, origen de cada dato, presupuesto de recursos, decisiones y límites) está en [ESTRUCTURA.md](ESTRUCTURA.md).
+La referencia completa (árbol, origen de cada dato, presupuesto de recursos, decisiones y límites) está en [ESTRUCTURA.md](ESTRUCTURA.md). Los argumentos y variables de cada comando, en [COMANDOS.md](COMANDOS.md).
 
 ## 1. Máquina virtual
 
@@ -122,6 +122,25 @@ kubectl -n tenant-beta logs --selector app.kubernetes.io/name=worker --tail=20  
 En otra terminal, `kubectl get pods -n tenant-beta -w` muestra el ciclo completo. Mientras `tests/keda.sh beta` corre, `tenant-alpha` permanece en 0 workers.
 
 Con 2 núcleos no caben a la vez el máximo de workers de beta y el máximo del HPA de las dos aplicaciones: ejecutar `tests/hpa.sh` y `tests/keda.sh beta` por separado.
+
+### Modo prioridad (carga de prioridad alta frente a baja)
+
+Agrega a beta una cola prioritaria `pedidos-vip` con su propio consumidor `worker-vip` (1 réplica por mensaje, sondeo cada 5 s) y vuelve más tolerante a la espera la cola estándar (15 mensajes por réplica, sondeo cada 15 s).
+
+```bash
+kubectl apply -k admin/events/tenants/beta-priority   # el broker se reinicia
+kubectl -n tenant-beta rollout status deployment/rabbitmq
+tests/priority.sh beta                                # 30 mensajes de prioridad 1 y 10 de prioridad 10
+```
+
+En otras terminales: `kubectl get pods -n tenant-beta -w` y `kubectl get hpa -n tenant-beta -w`. La prueba termina con una tabla comparativa: primer worker, pico de workers y tiempo hasta vaciar cada cola.
+
+Retirar el modo prioridad:
+
+```bash
+kubectl -n tenant-beta delete scaledobject,deployment,configmap --selector paas/priority=vip
+kubectl apply -k admin/events/tenants/beta
+```
 
 ## 6. Acceso desde el equipo anfitrión
 
