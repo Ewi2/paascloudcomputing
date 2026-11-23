@@ -33,7 +33,7 @@ spec:
         - name: RABBITMQ_API
           value: http://rabbitmq:15672   # Service del mismo namespace
         - name: QUEUE_NAME
-          value: pedidos           # mismo valor en rabbitmq.yaml y scaler.yaml
+          value: pedidos           # mismo valor que queueName de scaler.yaml; debe figurar en QUEUES de rabbitmq.yaml
         - name: RABBITMQ_USER
           valueFrom:
             secretKeyRef: {name: rabbitmq-credentials, key: RABBITMQ_DEFAULT_USER}

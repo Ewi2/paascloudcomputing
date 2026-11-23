@@ -1,0 +1,17 @@
+# Fase 5 de tenant-beta en modo prioridad: el overlay normal de beta más el Component priority.
+#   kubectl apply -k admin/events/tenants/beta-priority
+#
+# | Cola        | Consumidor | Máx. workers | Mensajes por réplica | Sondeo | Cooldown |
+# | pedidos     | worker     | 15           | 15                   | 15 s   | 20 s     |
+# | pedidos-vip | worker-vip | 15           | 1                    | 5 s    | 15 s     |
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tenant-beta
+resources:
+- ../beta
+components:
+- ../../priority
+labels:
+- pairs:
+    app.kubernetes.io/part-of: paas-events
+    paas/tenant: beta

@@ -16,35 +16,8 @@ readonly TIMEOUT="${TIMEOUT:-300}"
 require_tenant "$TENANT"
 readonly NS="tenant-$TENANT"
 
-# Operaciones sobre la cola. Se ejecutan dentro del pod del broker, contra su API HTTP local y
-# con las credenciales de su entorno: la clave no sale del pod.
-#   publish <cola> <cantidad>   publica mensajes e imprime cuántos quedaron encolados
-#   length <cola>               imprime los mensajes pendientes
-read -r -d '' BROKER_TOOL <<'TOOL' || true
-api=http://127.0.0.1:15672/api
-auth="Authorization: Basic $(printf '%s:%s' "$RABBITMQ_DEFAULT_USER" "$RABBITMQ_DEFAULT_PASS" | base64)"
-case "$1" in
-  publish)
-    routed=0
-    i=1
-    while [ "$i" -le "$3" ]; do
-      body="{\"properties\":{},\"routing_key\":\"$2\",\"payload\":\"Pedido_$i\",\"payload_encoding\":\"string\"}"
-      wget -q -O - --header "$auth" --header 'content-type: application/json' --post-data "$body" \
-        "$api/exchanges/%2F/amq.default/publish" | grep -q '"routed": *true' && routed=$((routed + 1))
-      i=$((i + 1))
-    done
-    echo "$routed"
-    ;;
-  length)
-    wget -q -O - --header "$auth" "$api/queues/%2F/$2" | sed -n 's/.*"messages": *\([0-9]*\).*/\1/p'
-    ;;
-esac
-TOOL
-readonly BROKER_TOOL
-
-broker() { kubectl -n "$NS" exec deployment/rabbitmq -- sh -c "$BROKER_TOOL" broker "$@"; }
-
-scaler_field() { kubectl -n "$NS" get scaledobject worker --output "jsonpath={$1}" 2>/dev/null; }
+# Campo del ScaledObject del consumidor estándar del tenant.
+worker_field() { scaler_field "$NS" worker "$1"; }
 
 # Suma de las réplicas de worker en los demás tenants.
 other_tenants_replicas() {
@@ -56,11 +29,11 @@ other_tenants_replicas() {
   echo "$total"
 }
 
-QUEUE="$(scaler_field '.spec.triggers[0].metadata.queueName')"
+QUEUE="$(worker_field '.spec.triggers[0].metadata.queueName')"
 [ -n "$QUEUE" ] || die "la Fase 5 no está instalada en $NS (scripts/bootstrap.sh events)"
-MAX_REPLICAS="$(scaler_field .spec.maxReplicaCount)"
-MESSAGES_PER_REPLICA="$(scaler_field '.spec.triggers[0].metadata.value')"
-COOLDOWN="$(scaler_field .spec.cooldownPeriod)"
+MAX_REPLICAS="$(worker_field .spec.maxReplicaCount)"
+MESSAGES_PER_REPLICA="$(worker_field '.spec.triggers[0].metadata.value')"
+COOLDOWN="$(worker_field .spec.cooldownPeriod)"
 readonly QUEUE MAX_REPLICAS MESSAGES_PER_REPLICA COOLDOWN
 
 info "SLA de $TENANT: hasta $MAX_REPLICAS workers, 1 réplica cada $MESSAGES_PER_REPLICA mensajes, cooldown de ${COOLDOWN}s"
@@ -68,7 +41,7 @@ info "SLA de $TENANT: hasta $MAX_REPLICAS workers, 1 réplica cada $MESSAGES_PER
 others_before="$(other_tenants_replicas)"
 
 info "Publicando $MESSAGES mensajes en la cola '$QUEUE'"
-routed="$(broker publish "$QUEUE" "$MESSAGES")"
+routed="$(broker "$NS" publish "$QUEUE" "$MESSAGES")"
 if [ "$routed" = "$MESSAGES" ]; then
   pass "$routed mensajes encolados"
 else
@@ -81,7 +54,7 @@ drained=no
 deadline=$((SECONDS + TIMEOUT))
 while [ "$SECONDS" -lt "$deadline" ]; do
   replicas="$(deployment_replicas "$NS" worker)"
-  pending="$(broker length "$QUEUE")"
+  pending="$(broker "$NS" length "$QUEUE")"
   others="$(other_tenants_replicas)"
   [ "$replicas" -gt "$peak" ] && peak="$replicas"
   [ "$others" -gt "$others_peak" ] && others_peak="$others"

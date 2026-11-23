@@ -23,6 +23,7 @@ La fuente de verdad son los archivos del repositorio. Si un archivo y este docum
 paas-lab/
 ├── README.md                          Guía de ejecución
 ├── ESTRUCTURA.md                      Este documento
+├── COMANDOS.md                        Argumentos y variables de cada comando
 ├── admin/                             Lo que solo toca el administrador
 │   ├── tenancy/                       Fase 1 (Kustomize)
 │   │   ├── base/                      Común a todo tenant
@@ -50,14 +51,21 @@ paas-lab/
 │       ├── keda-values.yaml           Recursos de KEDA para la VM
 │       ├── base/                      Común a todo tenant
 │       │   ├── kustomization.yaml
-│       │   ├── rabbitmq.yaml          Broker (Deployment y Service, puertos 5672 y 15672)
-│       │   ├── worker.yaml            Consumidor (Deployment, 0 réplicas iniciales)
-│       │   ├── worker.sh              Lógica del consumidor (ConfigMap generado)
-│       │   ├── scaler.yaml            TriggerAuthentication y ScaledObject
+│       │   ├── rabbitmq.yaml          Broker (Deployment y Service, puertos 5672 y 15672); declara las colas de QUEUES
+│       │   ├── auth.yaml              TriggerAuthentication (credenciales del broker para KEDA)
 │       │   └── networkpolicy.yaml     Permite a KEDA consultar el broker
+│       ├── consumer/                  Consumidor reutilizable de una cola
+│       │   ├── kustomization.yaml
+│       │   ├── worker.yaml            Deployment "worker" (0 réplicas iniciales)
+│       │   ├── worker.sh              Lógica del consumidor (ConfigMap generado)
+│       │   └── scaler.yaml            ScaledObject "worker"
+│       ├── priority/                  Modo prioridad (Component)
+│       │   ├── kustomization.yaml     Cola estándar más tolerante; el broker declara pedidos-vip
+│       │   └── vip/kustomization.yaml consumer/ con sufijo -vip: cola pedidos-vip, SLA rápido
 │       └── tenants/                   SLA de eventos por tenant
 │           ├── alpha/kustomization.yaml   hasta 5 workers, 1 cada 5 mensajes
-│           └── beta/kustomization.yaml    hasta 15 workers, 1 cada 2 mensajes
+│           ├── beta/kustomization.yaml    hasta 15 workers, 1 cada 2 mensajes
+│           └── beta-priority/kustomization.yaml   beta + modo prioridad
 ├── paas-app-chart/                    Fases 2-3 (Helm): la plantilla de toda aplicación
 │   ├── Chart.yaml
 │   ├── values.yaml                    Valores por defecto (del administrador)
@@ -77,7 +85,8 @@ paas-lab/
     ├── isolation.sh  quota.sh         Fase 1
     ├── ratelimit.sh                   Fase 2
     ├── hpa.sh                         Fase 3
-    └── keda.sh                        Fase 5
+    ├── keda.sh                        Fase 5
+    └── priority.sh                    Fase 5, modo prioridad
 ```
 
 Convenciones:
@@ -106,7 +115,7 @@ Cada dato se define en un solo lugar. Quien lo necesita lo lee de ahí.
 
 El plan y el dominio viajan en el Namespace porque solo el administrador puede modificarlo: el cliente no puede cambiarse de plan ni publicar en el dominio de otro tenant.
 
-El nombre de la cola (`pedidos`) es la única repetición deliberada: aparece en `rabbitmq.yaml`, `worker.yaml` y `scaler.yaml`, porque un ScaledObject no puede leerlo de un ConfigMap. Cada aparición lleva un comentario que remite a las otras dos.
+El nombre de la cola es la única repetición deliberada: aparece en `QUEUES` de `rabbitmq.yaml` y en `consumer/worker.yaml` y `consumer/scaler.yaml`, porque un ScaledObject no puede leerlo de un ConfigMap. Cada aparición lleva un comentario que remite a las otras.
 
 ## 4. Entorno y presupuesto de recursos
 
@@ -227,6 +236,21 @@ Cada tenant tiene su broker RabbitMQ, un consumidor `worker` y un ScaledObject d
 
 El SLA de eventos es un contrato distinto del plan de cómputo: beta tiene el plan `basic` y el SLA de eventos de alta capacidad, como en la guía.
 
+#### Modo prioridad (`admin/events/priority/`)
+
+Un Component que se agrega al overlay de un tenant (`tenants/beta-priority/`):
+
+| Cola | Consumidor | Máx. workers | Mensajes por réplica | Sondeo | Cooldown |
+|---|---|---|---|---|---|
+| `pedidos` | `worker` | 15 | 15 | 15 s | 20 s |
+| `pedidos-vip` (`x-max-priority: 10`) | `worker-vip` | 15 | 1 | 5 s | 15 s |
+
+- **Un consumidor por cola.** KEDA rechaza un segundo ScaledObject sobre un Deployment que ya tiene uno. `worker-vip` es `consumer/` incluido con `nameSuffix: -vip` y parches para la cola, las etiquetas y `scaleTargetRef` (Kustomize no renombra referencias dentro de recursos personalizados).
+- **El parche de la cola estándar selecciona por etiqueta** (`!paas/priority`), no por nombre: Kustomize también compara el nombre original de cada recurso, y el de `worker-vip` es `worker`.
+- **`pollingInterval` rige la activación 0 → 1.** Con el consumidor ya activo, el HPA que crea KEDA consulta la métrica cada 15 s en ambas colas; la diferencia de respuesta después de activarse viene del número de mensajes por réplica.
+- **La prioridad por mensaje solo ordena dentro de una misma cola.** `pedidos-vip` admite prioridades y la prueba publica con prioridad 10, pero la separación entre carga crítica y estándar la dan las dos colas y sus SLA. `pedidos` no es una cola con prioridades: allí la propiedad `priority` no tiene efecto.
+- **Presupuesto:** la prueba levanta unos 12 workers (10 VIP y 2 estándar), 120m de CPU. Los dos consumidores al máximo (30 workers) superarían la cuota de 30 pods de beta y la CPU libre del nodo.
+
 ## 6. Flujo de despliegue
 
 1. El cliente edita `~/values.yaml` y ejecuta `sudo -u <administrador> /opt/paas/scripts/deploy.sh <tenant>`. La regla de sudoers solo le permite ese comando con su tenant.
@@ -284,6 +308,17 @@ Las variables de entorno van a un ConfigMap (`env`) o a un Secret (`secretEnv`).
 | 50 ejecuciones de `kubectl exec ... rabbitmqadmin publish` | `tests/keda.sh <tenant> [mensajes]` |
 | alpha: máximo 5, `value: "5"`; beta: máximo 15, `value: "2"`; `cooldownPeriod: 20` | Iguales |
 
+### Guía "Cargas de prioridad alta vs. baja con KEDA"
+
+| En la guía | En este repositorio |
+|---|---|
+| `rabbitmqadmin declare queue name=pedidos-vip arguments='{"x-max-priority":10}'` | `QUEUES="pedidos pedidos-vip:10"`: el broker la declara al arrancar |
+| ScaledObject `keda-rabbitmq-vip` sobre `worker-app` | ScaledObject `worker-vip` sobre su propio Deployment `worker-vip` (KEDA no admite dos ScaledObject sobre el mismo Deployment) |
+| `kubectl patch scaledobject keda-rabbitmq-scaler` (`value: "15"`, sondeo 15 s) | Parche del Component `priority/`; se revierte aplicando el overlay normal |
+| Credenciales `guest:guest` en el ScaledObject | TriggerAuthentication `rabbitmq` compartida |
+| 30 mensajes `priority: 1` a `pedidos-beta` y 10 `priority: 10` a `pedidos-vip` | `tests/priority.sh` (mismas cantidades por defecto) |
+| Nota: apuntar o duplicar el consumidor hacia `pedidos-vip` | Resuelto: `worker-vip` consume `pedidos-vip` |
+
 Diferencias deliberadas:
 
 - **Sin credenciales `guest`.** Usuario `paas` con clave aleatoria por tenant.
@@ -306,7 +341,7 @@ El pico de réplicas depende de cuántos mensajes queden en cola cuando el HPA e
 - `tests/lib.sh` reúne lo común de las pruebas. Se agregan `tests/hpa.sh` (el README lo citaba y no existía) y `tests/keda.sh`.
 - `PLAN.md` se retira; su contenido vigente está en este documento.
 
-**Fase 5 (nueva):** `admin/events/`, según las guías de las semanas 15 y 17.
+**Fase 5 (nueva):** `admin/events/`, según las guías de las semanas 15 y 17. Después se agregó el modo prioridad (`priority/`, `tests/priority.sh`); para reutilizar el consumidor, el Deployment y el ScaledObject pasaron de `base/` a `consumer/`, la TriggerAuthentication a `base/auth.yaml`, y el broker declara una lista de colas (`QUEUES`) en lugar de una sola.
 
 **Ajustes para la VM de 2 vCPU y 4 GB**
 

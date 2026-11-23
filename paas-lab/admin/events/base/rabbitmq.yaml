@@ -38,25 +38,38 @@ spec:
         - name: RABBITMQ_DEFAULT_PASS
           valueFrom:
             secretKeyRef: {name: rabbitmq-credentials, key: RABBITMQ_DEFAULT_PASS}
-        - name: QUEUE_NAME
-          value: pedidos           # mismo valor en worker.yaml y scaler.yaml
+        - name: QUEUES
+          # Colas que el broker declara al arrancar, separadas por espacios. Formato:
+          # <nombre> o <nombre>:<prioridad máxima> (cola con prioridades, x-max-priority).
+          value: pedidos
         lifecycle:
           postStart:
             exec:
-              # Declara la cola en cuanto la API de administración responde (operación
-              # idempotente). Así la cola existe siempre que el broker está en servicio y
-              # KEDA puede consultarla aunque todavía no haya productores ni consumidores.
+              # Declara las colas en cuanto la API de administración responde (operación
+              # idempotente). Así existen siempre que el broker está en servicio y KEDA puede
+              # consultarlas aunque todavía no haya productores ni consumidores.
               command:
               - sh
               - -c
               - |
+                admin() {
+                  rabbitmqadmin --username="$RABBITMQ_DEFAULT_USER" --password="$RABBITMQ_DEFAULT_PASS" "$@"
+                }
                 for _ in $(seq 60); do
-                  rabbitmqadmin --username="$RABBITMQ_DEFAULT_USER" --password="$RABBITMQ_DEFAULT_PASS" \
-                    declare queue name="$QUEUE_NAME" durable=true >/dev/null 2>&1 && exit 0
+                  admin list queues >/dev/null 2>&1 && break
                   sleep 3
                 done
-                echo "no se pudo declarar la cola $QUEUE_NAME" >&2
-                exit 1
+                status=0
+                for entry in $QUEUES; do
+                  name="${entry%%:*}"
+                  case "$entry" in
+                    *:*) set -- arguments="{\"x-max-priority\":${entry#*:}}" ;;
+                    *)   set -- ;;
+                  esac
+                  admin declare queue name="$name" durable=true "$@" >/dev/null \
+                    || { echo "no se pudo declarar la cola $name" >&2; status=1; }
+                done
+                exit "$status"
         resources:
           requests: {cpu: 50m, memory: 160Mi}
           limits: {cpu: 500m, memory: 512Mi}

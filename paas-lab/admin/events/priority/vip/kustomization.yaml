@@ -1,0 +1,49 @@
+# Consumidor de la cola prioritaria: el mismo consumidor de consumer/ con el sufijo -vip,
+# su propia cola y un SLA de respuesta rápida. Lo incluye el Component priority/.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../consumer
+nameSuffix: -vip
+labels:
+- pairs:
+    paas/priority: vip             # selector para retirar el modo prioridad (ver priority/kustomization.yaml)
+patches:
+# Etiquetas propias: con las del worker estándar, cada Deployment seleccionaría los pods del otro.
+- target:
+    kind: Deployment
+  patch: |-
+    - op: replace
+      path: /metadata/labels/app.kubernetes.io~1name
+      value: worker-vip
+    - op: replace
+      path: /spec/selector/matchLabels/app.kubernetes.io~1name
+      value: worker-vip
+    - op: replace
+      path: /spec/template/metadata/labels/app.kubernetes.io~1name
+      value: worker-vip
+    - op: replace
+      path: /spec/template/spec/containers/0/env/1/value
+      value: pedidos-vip           # QUEUE_NAME
+# Kustomize no renombra referencias dentro de recursos personalizados: scaleTargetRef se fija aquí.
+- target:
+    kind: ScaledObject
+  patch: |-
+    - op: replace
+      path: /spec/scaleTargetRef/name
+      value: worker-vip
+    - op: replace
+      path: /spec/triggers/0/metadata/queueName
+      value: pedidos-vip
+    - op: replace
+      path: /spec/maxReplicaCount
+      value: 15
+    - op: replace
+      path: /spec/triggers/0/metadata/value
+      value: "1"                   # una réplica por mensaje
+    - op: replace
+      path: /spec/pollingInterval
+      value: 5
+    - op: replace
+      path: /spec/cooldownPeriod
+      value: 15

@@ -1,0 +1,11 @@
+# Credenciales del broker para KEDA: se leen del Secret, no se escriben en el ScaledObject.
+# La comparten todos los ScaledObject del tenant (worker y, en modo prioridad, worker-vip).
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: rabbitmq
+spec:
+  secretTargetRef:
+  - parameter: host
+    name: rabbitmq-credentials
+    key: AMQP_URI                  # amqp://<usuario>:<clave>@rabbitmq.<namespace>.svc.cluster.local:5672/
